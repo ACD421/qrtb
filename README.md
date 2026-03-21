@@ -4,79 +4,67 @@
 
 ### Quantum-Resistant Temporal Blockchain
 
-**Post-quantum cryptography | WOTS+ on SHA3-256 | Temporal authentication | Forward secrecy**
+**WOTS+ on SHA3-256 | Temporal key rotation | BFT consensus | Forward secrecy**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/Python-3.10+-green.svg)](https://python.org)
-[![Rust](https://img.shields.io/badge/Rust-native-orange.svg)](https://rust-lang.org)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10+-green.svg)](https://python.org)
+[![Rust](https://img.shields.io/badge/Rust-Native%20Crypto-orange.svg)](https://rust-lang.org)
 
 </div>
 
 ## Overview
 
-QRTB is a production-grade blockchain implementation designed to resist quantum computing attacks. It replaces ECDSA (vulnerable to Shor's algorithm) with **WOTS+ (Winternitz One-Time Signature)** built on SHA3-256, combined with Merkle tree state management and temporal authentication for automatic key rotation.
-
-## Why Post-Quantum?
-
-Current blockchain cryptography (ECDSA on secp256k1) will be broken by sufficiently powerful quantum computers running Shor's algorithm. QRTB addresses this by:
-
-- **WOTS+ signatures**: Hash-based, no algebraic structure to attack
-- **SHA3-256 foundation**: Quantum-resistant hash function (Grover's gives only sqrt speedup)
-- **Automatic key rotation**: Temporal authentication ensures forward secrecy
-- **Merkle tree state**: Efficient verification without exposing signing keys
+A blockchain built for the post-quantum era. Uses **WOTS+ (Winternitz One-Time Signatures)** on **SHA3-256** instead of ECDSA, with temporal key evolution that provides forward secrecy by design. Keys rotate automatically -- compromising a future key reveals nothing about past signatures.
 
 ## Architecture
 
+### Python Layer -- Protocol Logic
+
 ```
-+------------------+     +------------------+     +------------------+
-|  Transaction     |     |  Block           |     |  Chain           |
-|  Layer           |---->|  Assembly        |---->|  Consensus       |
-|                  |     |                  |     |                  |
-|  WOTS+ signing   |     |  Merkle roots    |     |  BFT protocol    |
-|  Temporal auth   |     |  State proofs    |     |  Fork resolution |
-+------------------+     +------------------+     +------------------+
-        |                         |                        |
-        v                         v                        v
-+------------------+     +------------------+     +------------------+
-|  Crypto          |     |  Storage         |     |  Network         |
-|                  |     |                  |     |                  |
-|  SHA3-256        |     |  Block store     |     |  P2P gossip      |
-|  WOTS+ keygen    |     |  UTXO index      |     |  Peer discovery  |
-|  Key rotation    |     |  Merkle trees    |     |  Sync protocol   |
-+------------------+     +------------------+     +------------------+
+src/
+|-- crypto.py           # SHA3-256/512, WOTS+ signatures, Merkle trees, temporal keys
+|-- block_producer.py   # Transaction collection, Merkle root, consensus integration
+|-- consensus.py        # BFT consensus with 2/3+ stake threshold
+|-- transaction.py      # UTXO model, transaction validation, mempool
+|-- wallet.py           # Key management, signing, address derivation
+|-- validator.py        # Block and transaction validation rules
+|-- epoch.py            # Epoch management, key rotation scheduling
+|-- measurement.py      # Network measurement protocol for consensus
+|-- detection.py        # Anomaly and attack detection
+|-- network.py          # P2P networking layer
+|-- storage.py          # Persistent block and UTXO storage
++-- performance.py      # Benchmarking and performance metrics
 ```
 
-## Components
+### Rust/C Layer -- Performance-Critical Crypto
 
-### Python Implementation
+```
+native/
+|-- src/
+|   |-- wots.rs         # WOTS+ signature generation/verification
+|   |-- sha3.rs         # SHA3-256/512 implementation
+|   |-- merkle.rs       # Merkle tree construction
+|   +-- temporal_auth.rs # Temporal authentication chains
+|-- csrc/
+|   |-- wots.c          # C fallback: WOTS+ signatures
+|   |-- sha3.c          # C fallback: SHA3 hashing
+|   |-- merkle.c        # C fallback: Merkle trees
+|   +-- temporal_auth.c # C fallback: temporal auth
++-- Cargo.toml
+```
 
-| Module | Description |
-|--------|-------------|
-| `src/crypto.py` | WOTS+ signature scheme on SHA3-256 |
-| `src/temporal_auth.py` | Time-based key rotation with forward secrecy |
-| `src/merkle.py` | Merkle tree construction and proof generation |
-| `src/block.py` | Block structure with quantum-resistant signatures |
-| `src/chain.py` | Chain management and fork resolution |
-| `src/consensus.py` | BFT consensus protocol |
-| `src/transaction.py` | Transaction creation and validation |
-| `src/network.py` | P2P networking layer |
-| `src/storage.py` | Persistent block and state storage |
-| `src/performance.py` | Benchmarking and optimization (16M TPS target) |
+## Why WOTS+
 
-### Native Implementations
+ECDSA (secp256k1, ed25519) breaks under Shor's algorithm. WOTS+ is a hash-based signature scheme -- its security reduces to the preimage resistance of SHA3-256, which is quantum-resistant.
 
-- **Rust**: High-performance crypto primitives
-- **C**: SHA3-256 and WOTS+ for embedded targets
+| Property | ECDSA | WOTS+ |
+|----------|-------|-------|
+| Quantum resistance | No | Yes |
+| Security assumption | ECDLP hardness | SHA3 preimage resistance |
+| Signature size | 64 bytes | ~2 KB |
+| Key reuse | Unlimited | One-time (managed by temporal rotation) |
 
-## Key Properties
-
-| Property | Guarantee |
-|----------|-----------|
-| Quantum resistance | WOTS+ -- no algebraic structure to attack |
-| Forward secrecy | Temporal key rotation, old keys cannot sign future |
-| Signature size | ~2.5 KB per WOTS+ signature |
-| Verification speed | O(1) per signature, O(log n) Merkle proof |
-| TPS target | 16M (with native crypto) |
+The one-time limitation of WOTS+ is handled by **temporal key evolution** -- automatic key rotation with forward secrecy guarantees.
 
 ## Quick Start
 
@@ -84,27 +72,17 @@ Current blockchain cryptography (ECDSA on secp256k1) will be broken by sufficien
 # Run testnet
 python run_testnet.py
 
-# Run live node
-python run_live.py
-
-# Integration tests
+# Run integration tests
 python test_integration.py
+
+# Benchmark native crypto
+cd native && cargo bench
 ```
 
-## Security Model
+## Related
 
-**Threat model**: Adversary with access to a cryptographically relevant quantum computer (CRQC).
-
-- **ECDSA**: Broken by Shor's algorithm in polynomial time
-- **RSA**: Broken by Shor's algorithm in polynomial time
-- **WOTS+ on SHA3-256**: Requires Grover's algorithm, which only provides sqrt speedup. Effective security remains at 128-bit equivalent.
-
-Temporal authentication adds defense in depth: even if a signing key is compromised, it cannot be used outside its validity window.
-
-## Related Work
-
-- [secp256k1-geometric-analysis](https://github.com/ACD421/secp256k1-geometric-analysis) -- Research on the curve QRTB is designed to replace
-- [SGM-Substrate](https://github.com/ACD421/sgm-substrate) -- Same author, different domain (AI architecture)
+- [secp256k1-geometric-analysis](https://github.com/ACD421/secp256k1-geometric-analysis) -- Why secp256k1 needs replacing
+- [SGM-Substrate](https://github.com/ACD421/sgm-substrate) -- Same geometric thinking applied to AI
 
 ## Author
 
