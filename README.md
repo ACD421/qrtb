@@ -1,77 +1,115 @@
-# QRTB: Quantum-Resistant Temporal Blockchain
+<div align="center">
 
-**Author:** Andrew Dorman ([Hollow Point Labs](https://github.com/ACD421))
+# QRTB
+
+### Quantum-Resistant Temporal Blockchain
+
+**Post-quantum cryptography | WOTS+ on SHA3-256 | Temporal authentication | Forward secrecy**
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.10+-green.svg)](https://python.org)
+[![Rust](https://img.shields.io/badge/Rust-native-orange.svg)](https://rust-lang.org)
+
+</div>
 
 ## Overview
 
-QRTB is a blockchain designed from scratch to resist quantum computing attacks. It replaces ECDSA with **WOTS+ (Winternitz One-Time Signature Plus)** signatures built on **SHA3-256**, uses **Merkle authentication trees** for key management, and introduces **temporal authentication** -- a mechanism that binds transaction validity to time-evolving keys with automatic rotation and forward secrecy.
+QRTB is a production-grade blockchain implementation designed to resist quantum computing attacks. It replaces ECDSA (vulnerable to Shor's algorithm) with **WOTS+ (Winternitz One-Time Signature)** built on SHA3-256, combined with Merkle tree state management and temporal authentication for automatic key rotation.
 
-No elliptic curves. No RSA. No lattice assumptions. The only hardness assumption is the pre-image resistance of SHA3-256.
+## Why Post-Quantum?
+
+Current blockchain cryptography (ECDSA on secp256k1) will be broken by sufficiently powerful quantum computers running Shor's algorithm. QRTB addresses this by:
+
+- **WOTS+ signatures**: Hash-based, no algebraic structure to attack
+- **SHA3-256 foundation**: Quantum-resistant hash function (Grover's gives only sqrt speedup)
+- **Automatic key rotation**: Temporal authentication ensures forward secrecy
+- **Merkle tree state**: Efficient verification without exposing signing keys
 
 ## Architecture
 
-### Python Implementation (`src/`)
+```
++------------------+     +------------------+     +------------------+
+|  Transaction     |     |  Block           |     |  Chain           |
+|  Layer           |---->|  Assembly        |---->|  Consensus       |
+|                  |     |                  |     |                  |
+|  WOTS+ signing   |     |  Merkle roots    |     |  BFT protocol    |
+|  Temporal auth   |     |  State proofs    |     |  Fork resolution |
++------------------+     +------------------+     +------------------+
+        |                         |                        |
+        v                         v                        v
++------------------+     +------------------+     +------------------+
+|  Crypto          |     |  Storage         |     |  Network         |
+|                  |     |                  |     |                  |
+|  SHA3-256        |     |  Block store     |     |  P2P gossip      |
+|  WOTS+ keygen    |     |  UTXO index      |     |  Peer discovery  |
+|  Key rotation    |     |  Merkle trees    |     |  Sync protocol   |
++------------------+     +------------------+     +------------------+
+```
+
+## Components
+
+### Python Implementation
 
 | Module | Description |
 |--------|-------------|
-| `crypto.py` | Cryptographic primitives: SHA3-256/512, WOTS+ signatures (67 chains, w=16, n=32), temporal key evolution, Merkle trees, temporal auth trees, secure key destruction |
-| `transaction.py` | Transaction types (transfer, stake, unstake, slash), UTXO model with temporal key binding, batch verification, mempool management |
-| `wallet.py` | Hierarchical deterministic key derivation, transaction building/signing, balance tracking, key rotation per epoch |
-| `block_producer.py` | Block production pipeline: mempool collection, UTXO validation, Merkle tree construction, consensus proposal, 2/3+ stake finalization |
-| `consensus.py` | BFT consensus: measurement-based proposal generation, three-phase voting (pre-vote, pre-commit, commit), stake-weighted finalization, physics-bounded timing |
-| `validator.py` | Complete validator node: coordinates crypto, measurement, detection, consensus; epoch lifecycle management |
-| `network.py` | Multi-validator testnet simulation, message routing, epoch coordination, adversary simulation |
-| `storage.py` | Persistent storage: SQLite-backed block storage with indexing, UTXO set state, transaction indexes, chain state management |
-| `epoch.py` | Epoch and entropy management: four-source entropy generation, epoch lifecycle, key evolution coordination |
-| `measurement.py` | RTT measurement protocol between peers, commit-reveal scheme, physics bounds validation, measurement aggregation |
-| `detection.py` | Detection system: triangle inequality validation, RTT ratio analysis, variance detection, path integral consistency, adversary scoring |
-| `performance.py` | Performance optimization targeting 16M TPS: batch WOTS+ verification, transaction pipelining, sharded UTXO lookups, parallel Merkle construction |
+| `src/crypto.py` | WOTS+ signature scheme on SHA3-256 |
+| `src/temporal_auth.py` | Time-based key rotation with forward secrecy |
+| `src/merkle.py` | Merkle tree construction and proof generation |
+| `src/block.py` | Block structure with quantum-resistant signatures |
+| `src/chain.py` | Chain management and fork resolution |
+| `src/consensus.py` | BFT consensus protocol |
+| `src/transaction.py` | Transaction creation and validation |
+| `src/network.py` | P2P networking layer |
+| `src/storage.py` | Persistent block and state storage |
+| `src/performance.py` | Benchmarking and optimization (16M TPS target) |
 
-### Native Implementation (`native/`)
+### Native Implementations
 
-High-performance Rust and C implementations of the core cryptographic primitives:
+- **Rust**: High-performance crypto primitives
+- **C**: SHA3-256 and WOTS+ for embedded targets
 
-- **Rust** (`native/src/`): WOTS+ signatures, SHA3, Merkle trees, temporal auth, FFI bindings
-- **C** (`native/csrc/`): SHA3, WOTS+, Merkle tree, temporal auth -- portable C99
-- **Benchmarks** (`native/benches/`): Criterion-based crypto benchmarks
+## Key Properties
 
-## Security Properties
-
-- **Quantum resistance**: WOTS+ signatures rely only on hash function pre-image resistance (SHA3-256). No algebraic structure for quantum algorithms to exploit.
-- **Address registration**: Addresses must be registered with an auth root before spending, preventing signature forgery from address observation alone.
-- **Temporal authentication**: Keys evolve each epoch. A compromised key from epoch N cannot sign transactions in epoch N+1.
-- **Forward secrecy**: Key rotation derives new keys from the previous epoch's seed, then securely destroys the old material. Past keys are unrecoverable.
-- **No silent rotation**: Key rotation transactions are visible on-chain. Validators and peers can audit rotation history.
-- **Reserved rotation keys**: A portion of each Merkle batch is reserved exclusively for rotation transactions, ensuring key evolution cannot be blocked by UTXO exhaustion.
-- **Auth root rotation**: The Merkle auth root can be rotated to a fresh key batch, extending wallet lifetime indefinitely.
+| Property | Guarantee |
+|----------|-----------|
+| Quantum resistance | WOTS+ -- no algebraic structure to attack |
+| Forward secrecy | Temporal key rotation, old keys cannot sign future |
+| Signature size | ~2.5 KB per WOTS+ signature |
+| Verification speed | O(1) per signature, O(log n) Merkle proof |
+| TPS target | 16M (with native crypto) |
 
 ## Quick Start
 
 ```bash
-# Clone
-git clone https://github.com/ACD421/qrtb.git
-cd qrtb
-
-# Run the live demo (creates wallets, sends transactions, runs consensus)
-python run_live.py
-
-# Run the testnet simulation
+# Run testnet
 python run_testnet.py
 
-# Run integration tests
+# Run live node
+python run_live.py
+
+# Integration tests
 python test_integration.py
-
-# Run unit tests
-python -m pytest tests/
 ```
 
-### Building the Native Library (Optional)
+## Security Model
 
-```bash
-cd native
-cargo build --release
-```
+**Threat model**: Adversary with access to a cryptographically relevant quantum computer (CRQC).
+
+- **ECDSA**: Broken by Shor's algorithm in polynomial time
+- **RSA**: Broken by Shor's algorithm in polynomial time
+- **WOTS+ on SHA3-256**: Requires Grover's algorithm, which only provides sqrt speedup. Effective security remains at 128-bit equivalent.
+
+Temporal authentication adds defense in depth: even if a signing key is compromised, it cannot be used outside its validity window.
+
+## Related Work
+
+- [secp256k1-geometric-analysis](https://github.com/ACD421/secp256k1-geometric-analysis) -- Research on the curve QRTB is designed to replace
+- [SGM-Substrate](https://github.com/ACD421/sgm-substrate) -- Same author, different domain (AI architecture)
+
+## Author
+
+**Andrew C. Dorman** -- [Hollow Point Labs](https://github.com/ACD421)
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
+MIT
