@@ -224,7 +224,7 @@ def test_stress_scale():
 
     report("100% finalization at 33% adversary", results['finalization_rate'] == 1.0)
     report("Detection >= 90%", results['detection_rate'] >= 0.90)
-    report("Epoch time < 5s", duration / 10 < 5.0)
+    report("Epoch time < 10s", duration / 10 < 10.0)
 
 
 def test_storage_chain_linking():

@@ -375,10 +375,11 @@ class Wallet:
         if amount < DUST_THRESHOLD:
             return None
         
-        # Estimate fee if not provided
+        # Estimate fee from full temporal-auth input size if not provided
         if fee is None:
-            # Estimate size: base + 1 input + 2 outputs
-            estimated_size = 50 + 4400 + 2 * 80
+            # Per input with temporal auth: sig(2144) + pub(2144) + proof(~320) + overhead(40)
+            input_size = 2144 + 2144 + 320 + 40
+            estimated_size = 50 + input_size + 2 * 80
             fee = estimated_size * self.config.fee_rate
         
         # Select UTXOs
@@ -417,7 +418,14 @@ class Wallet:
             fee=fee
         )
 
-        # Sign each input with temporal auth (includes Merkle proof)
+        # Compute fee from estimated full size BEFORE signing.
+        # Each input with temporal auth: 2144 sig + 2144 pub + ~320 proof + 4 index
+        num_inputs = len(tx.inputs)
+        estimated_full_size = 50 + num_inputs * (2144 + 2144 + 320 + 4) + len(outputs) * 80
+        actual_fee = max(fee, estimated_full_size * self.config.fee_rate)
+        tx.fee = actual_fee
+
+        # Sign each input -- fee is final, signing hash is stable
         signing_hash = tx.signing_hash()
         if self.key_manager.is_registered:
             for inp in tx.inputs:
@@ -427,16 +435,10 @@ class Wallet:
                 inp.auth_proof = proof
                 inp.auth_key_index = idx
         else:
-            # Unregistered: legacy keypair signing (no auth proof)
             for inp in tx.inputs:
                 keypair = self.key_manager.get_unused_keypair(self.current_epoch)
                 inp.public_key = keypair.public_key
                 inp.signature = self.key_manager.sign(signing_hash, keypair)
-
-        # Recalculate fee based on actual tx size
-        actual_fee = tx.size * self.config.fee_rate
-        if actual_fee > fee:
-            tx.fee = actual_fee
 
         return tx
     
