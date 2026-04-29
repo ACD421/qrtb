@@ -1,0 +1,8 @@
+# QRTB has zero external Python dependencies.
+# All modules use Python 3.10+ stdlib only:
+#   hashlib, secrets, struct, ctypes, sqlite3, asyncio,
+#   dataclasses, typing, enum, collections, threading,
+#   concurrent.futures, multiprocessing, tempfile, os, sys, time
+#
+# Native (Rust): cargo build --release (see native/Cargo.toml)
+# CUDA: nvcc (see native/cuda/)

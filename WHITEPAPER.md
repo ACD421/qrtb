@@ -556,6 +556,8 @@ GPU SHA3-256 output was cross-validated against the CPU implementation to ensure
 
 **Network Coordinate Systems** [9]: Dabek et al. (Vivaldi) and related work on RTT-based positioning. QRTB uses RTT measurements for adversary detection rather than coordinate estimation.
 
+**VerLoc** [12]: Kohls et al. (USENIX Security 2022) implement RTT-based geolocation verification in the Nym mixnet, achieving 60km median localization error with commit-based scheduling and trilateration. VerLoc uses RTT measurement as a verification layer for node location claims. QRTB goes further: RTT measurement is not a verification overlay but the consensus mechanism itself -- the act of measuring IS the act of participating in consensus. VerLoc detects geographic misrepresentation; QRTB detects it AND uses the measurement data to drive block finalization, proposer selection entropy, and adversary slashing.
+
 ---
 
 ## 11. Limitations and Future Work
@@ -601,6 +603,8 @@ The system is self-correcting: adversarial behavior is detected through physics,
 [8] E. Buchman, "Tendermint: Byzantine Fault Tolerance in the Age of Blockchains," 2016.
 
 [9] F. Dabek et al., "Vivaldi: A Decentralized Network Coordinate System," SIGCOMM 2004.
+
+[12] K. Kohls et al., "VerLoc: Verifiable Localization in Decentralized Systems," USENIX Security 2022.
 
 [10] NIST FIPS 202, "SHA-3 Standard: Permutation-Based Hash and Extendable-Output Functions," August 2015.
 

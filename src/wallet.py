@@ -397,35 +397,17 @@ class Wallet:
         if change >= DUST_THRESHOLD:
             outputs.append(TxOutput(value=change, address=self.address))
 
-        # Build inputs -- use temporal auth for registered wallets
-        inputs = []
-        for utxo in utxos:
-            inputs.append(TxInput(
-                prev_tx_hash=utxo.tx_hash,
-                output_index=utxo.output_index,
-                signature=b"",
-                public_key=b""
-            ))
+        inputs = [TxInput(prev_tx_hash=u.tx_hash, output_index=u.output_index,
+                          signature=b"", public_key=b"") for u in utxos]
 
-        # Create transaction shell for signing hash
-        tx = Transaction(
-            version=1,
-            tx_type=TxType.TRANSFER,
-            inputs=inputs,
-            outputs=outputs,
-            epoch=self.current_epoch,
-            timestamp=int(time.time() * 1000),
-            fee=fee
-        )
-
-        # Compute fee from estimated full size BEFORE signing.
-        # Each input with temporal auth: 2144 sig + 2144 pub + ~320 proof + 4 index
-        num_inputs = len(tx.inputs)
-        estimated_full_size = 50 + num_inputs * (2144 + 2144 + 320 + 4) + len(outputs) * 80
-        actual_fee = max(fee, estimated_full_size * self.config.fee_rate)
-        tx.fee = actual_fee
-
-        # Sign each input -- fee is final, signing hash is stable
+        tx = Transaction(version=1, tx_type=TxType.TRANSFER, inputs=inputs,
+                         outputs=outputs, epoch=self.current_epoch,
+                         timestamp=int(time.time() * 1000), fee=fee)
+        self._sign_inputs(tx)
+        return tx
+    
+    def _sign_inputs(self, tx: Transaction) -> None:
+        """Sign all inputs using temporal auth (registered) or legacy keypairs."""
         signing_hash = tx.signing_hash()
         if self.key_manager.is_registered:
             for inp in tx.inputs:
@@ -440,187 +422,86 @@ class Wallet:
                 inp.public_key = keypair.public_key
                 inp.signature = self.key_manager.sign(signing_hash, keypair)
 
-        return tx
-    
-    def create_stake(self, amount: int, 
+    def _estimate_fee(self, num_inputs: int, num_outputs: int) -> int:
+        """Estimate fee based on full temporal-auth input size."""
+        input_size = 2144 + 2144 + 320 + 40  # sig + pub + proof + overhead
+        return (50 + num_inputs * input_size + num_outputs * 80) * self.config.fee_rate
+
+    def create_stake(self, amount: int,
                     lock_epochs: int = STAKING_LOCK_EPOCHS) -> Optional[Transaction]:
         """Create a staking transaction"""
         if amount < DUST_THRESHOLD:
             return None
-        
-        # Estimate fee
-        estimated_size = 50 + 4400 + 2 * 80
-        fee = estimated_size * self.config.fee_rate
-        
-        # Select UTXOs
+
+        fee = self._estimate_fee(1, 2)
         utxos, total_input = self.select_utxos(amount, fee)
         if total_input < amount + fee:
             return None
-        
-        # Build inputs
-        inputs = []
-        signing_keys = []
-        
-        for utxo in utxos:
-            keypair = self.key_manager.get_unused_keypair(self.current_epoch)
-            signing_keys.append(keypair)
-            
-            inp = TxInput(
-                prev_tx_hash=utxo.tx_hash,
-                output_index=utxo.output_index,
-                signature=b"",
-                public_key=keypair.public_key
-            )
-            inputs.append(inp)
-        
-        # Staking output - locked until lock_epoch
+
+        inputs = [TxInput(prev_tx_hash=u.tx_hash, output_index=u.output_index,
+                          signature=b"", public_key=b"") for u in utxos]
+
         lock_epoch = self.current_epoch + lock_epochs
-        outputs = [
-            TxOutput(
-                value=amount, 
-                address=self.address,
-                lock_epoch=lock_epoch
-            )
-        ]
-        
-        # Change
+        outputs = [TxOutput(value=amount, address=self.address, lock_epoch=lock_epoch)]
         change = total_input - amount - fee
         if change >= DUST_THRESHOLD:
-            change_keypair = self.key_manager.generate_keypair(self.current_epoch)
-            outputs.append(TxOutput(value=change, address=change_keypair.address))
-        
-        tx = Transaction(
-            version=1,
-            tx_type=TxType.STAKE,
-            inputs=inputs,
-            outputs=outputs,
-            epoch=self.current_epoch,
-            timestamp=int(time.time() * 1000),
-            fee=fee
-        )
-        
-        # Sign
-        signing_hash = tx.signing_hash()
-        for inp, keypair in zip(tx.inputs, signing_keys):
-            inp.signature = self.key_manager.sign(signing_hash, keypair)
-        
+            outputs.append(TxOutput(value=change, address=self.address))
+
+        tx = Transaction(version=1, tx_type=TxType.STAKE, inputs=inputs,
+                         outputs=outputs, epoch=self.current_epoch,
+                         timestamp=int(time.time() * 1000), fee=fee)
+        self._sign_inputs(tx)
         return tx
     
     def create_unstake(self) -> Optional[Transaction]:
         """Create unstaking transaction for all mature stakes"""
-        # Find staked UTXOs that are now unlocked
         staked_utxos = []
         total_staked = 0
-        
+
         for utxo in self.utxos.values():
-            if not utxo.is_spent:
-                if utxo.output.lock_epoch > 0:  # Was staked
-                    if utxo.output.lock_epoch <= self.current_epoch:  # Now unlocked
-                        staked_utxos.append(utxo)
-                        total_staked += utxo.output.value
-        
+            if not utxo.is_spent and utxo.output.lock_epoch > 0:
+                if utxo.output.lock_epoch <= self.current_epoch:
+                    staked_utxos.append(utxo)
+                    total_staked += utxo.output.value
+
         if not staked_utxos:
             return None
-        
-        # Build inputs
-        inputs = []
-        signing_keys = []
-        
-        for utxo in staked_utxos:
-            keypair = self.key_manager.get_unused_keypair(self.current_epoch)
-            signing_keys.append(keypair)
-            
-            inp = TxInput(
-                prev_tx_hash=utxo.tx_hash,
-                output_index=utxo.output_index,
-                signature=b"",
-                public_key=keypair.public_key
-            )
-            inputs.append(inp)
-        
-        # Estimate fee
-        estimated_size = 50 + len(inputs) * 4400 + 80
-        fee = estimated_size * self.config.fee_rate
-        
-        # Output - now spendable
-        outputs = [
-            TxOutput(value=total_staked - fee, address=self.address)
-        ]
-        
-        tx = Transaction(
-            version=1,
-            tx_type=TxType.UNSTAKE,
-            inputs=inputs,
-            outputs=outputs,
-            epoch=self.current_epoch,
-            timestamp=int(time.time() * 1000),
-            fee=fee
-        )
-        
-        # Sign
-        signing_hash = tx.signing_hash()
-        for inp, keypair in zip(tx.inputs, signing_keys):
-            inp.signature = self.key_manager.sign(signing_hash, keypair)
-        
+
+        fee = self._estimate_fee(len(staked_utxos), 1)
+        inputs = [TxInput(prev_tx_hash=u.tx_hash, output_index=u.output_index,
+                          signature=b"", public_key=b"") for u in staked_utxos]
+        outputs = [TxOutput(value=total_staked - fee, address=self.address)]
+
+        tx = Transaction(version=1, tx_type=TxType.UNSTAKE, inputs=inputs,
+                         outputs=outputs, epoch=self.current_epoch,
+                         timestamp=int(time.time() * 1000), fee=fee)
+        self._sign_inputs(tx)
         return tx
     
-    def create_data_tx(self, data: bytes, 
+    def create_data_tx(self, data: bytes,
                       fee: Optional[int] = None) -> Optional[Transaction]:
         """Create a data storage transaction"""
-        if len(data) > 1000:  # Max data size
+        if len(data) > 1000:
             return None
-        
-        # Estimate fee
-        estimated_size = 50 + 4400 + 80 + len(data)
+
         if fee is None:
-            fee = estimated_size * self.config.fee_rate
-        
-        # Need enough for fee only (data tx can have 0-value output)
+            fee = self._estimate_fee(1, 2)
+
         utxos, total_input = self.select_utxos(0, fee)
         if total_input < fee:
             return None
-        
-        # Build inputs
-        inputs = []
-        signing_keys = []
-        
-        for utxo in utxos:
-            keypair = self.key_manager.get_unused_keypair(self.current_epoch)
-            signing_keys.append(keypair)
-            
-            inp = TxInput(
-                prev_tx_hash=utxo.tx_hash,
-                output_index=utxo.output_index,
-                signature=b"",
-                public_key=keypair.public_key
-            )
-            inputs.append(inp)
-        
-        # Data output (can be 0 value) + change
-        outputs = [
-            TxOutput(value=0, address=self.address, data=data)
-        ]
-        
+
+        inputs = [TxInput(prev_tx_hash=u.tx_hash, output_index=u.output_index,
+                          signature=b"", public_key=b"") for u in utxos]
+        outputs = [TxOutput(value=0, address=self.address, data=data)]
         change = total_input - fee
         if change >= DUST_THRESHOLD:
-            change_keypair = self.key_manager.generate_keypair(self.current_epoch)
-            outputs.append(TxOutput(value=change, address=change_keypair.address))
+            outputs.append(TxOutput(value=change, address=self.address))
         
-        tx = Transaction(
-            version=1,
-            tx_type=TxType.DATA,
-            inputs=inputs,
-            outputs=outputs,
-            epoch=self.current_epoch,
-            timestamp=int(time.time() * 1000),
-            fee=fee
-        )
-        
-        # Sign
-        signing_hash = tx.signing_hash()
-        for inp, keypair in zip(tx.inputs, signing_keys):
-            inp.signature = self.key_manager.sign(signing_hash, keypair)
-        
+        tx = Transaction(version=1, tx_type=TxType.DATA, inputs=inputs,
+                         outputs=outputs, epoch=self.current_epoch,
+                         timestamp=int(time.time() * 1000), fee=fee)
+        self._sign_inputs(tx)
         return tx
     
     # =========================================================================

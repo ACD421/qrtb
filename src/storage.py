@@ -336,9 +336,25 @@ class TransactionStore:
                     WHERE tx_hash = ? AND output_index = ?
                 """, (spending_tx, tx_hash, output_index))
             return True
-        except:
+        except Exception:
             return False
     
+    def get_outputs(self, tx_hash: bytes) -> List[TxOutput]:
+        """Get all outputs for a transaction (for UTXO rebuild)."""
+        rows = self.conn.execute(
+            "SELECT output_index, value, address, lock_epoch FROM tx_outputs WHERE tx_hash = ? ORDER BY output_index",
+            (tx_hash,)
+        ).fetchall()
+        return [TxOutput(value=r['value'], address=r['address'], lock_epoch=r['lock_epoch']) for r in rows]
+
+    def get_inputs(self, tx_hash: bytes) -> List[Tuple[bytes, int]]:
+        """Get all inputs for a transaction as (prev_tx_hash, prev_output_index) pairs."""
+        rows = self.conn.execute(
+            "SELECT prev_tx_hash, prev_output_index FROM tx_inputs WHERE tx_hash = ? ORDER BY input_index",
+            (tx_hash,)
+        ).fetchall()
+        return [(r['prev_tx_hash'], r['prev_output_index']) for r in rows]
+
     def get_utxos_for_address(self, address: bytes) -> List[dict]:
         """Get unspent outputs for address"""
         rows = self.conn.execute("""
@@ -452,7 +468,7 @@ class StateDB:
                     VALUES (?, ?, ?, ?, ?)
                 """, (validator_id, address, stake, zone_id, epoch))
             return True
-        except:
+        except Exception:
             return False
     
     def update_validator_stake(self, validator_id: bytes, stake: int) -> bool:
@@ -463,7 +479,7 @@ class StateDB:
                     (stake, validator_id)
                 )
             return True
-        except:
+        except Exception:
             return False
     
     def slash_validator(self, validator_id: bytes, reason: str,
@@ -484,7 +500,7 @@ class StateDB:
                 """, (validator_id, epoch, reason, evidence_hash, slash_amount, 
                       int(time.time() * 1000)))
             return True
-        except:
+        except Exception:
             return False
     
     def get_active_validators(self, zone_id: Optional[int] = None) -> List[dict]:
@@ -571,7 +587,7 @@ class StateDB:
                     WHERE address = ?
                 """, (new_auth_root, epoch, tx_hash, address))
             return result.rowcount > 0
-        except:
+        except Exception:
             return False
 
     def get_auth_root(self, address: bytes) -> Optional[bytes]:
@@ -707,7 +723,7 @@ class StorageManager:
                 json.dump(snapshot, f, indent=2, default=str)
             
             return True
-        except:
+        except Exception:
             return False
 
 

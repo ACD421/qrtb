@@ -468,10 +468,41 @@ class Node:
         return b"".join(parts)
 
     def _deserialize_reveal(self, data: bytes) -> Optional[MeasurementReveal]:
-        """Deserialize -- simplified, skips full reconstruction."""
-        # In production you would fully reconstruct. For now we store raw
-        # and let the validator process the commitment it already received.
-        return None  # Handled via receive_reveal direct path for local testing
+        """Deserialize a MeasurementReveal matching _serialize_reveal format."""
+        try:
+            if len(data) < 44:
+                return None
+            offset = 0
+            validator_id = data[offset:offset + 32]; offset += 32
+            epoch = struct.unpack(">Q", data[offset:offset + 8])[0]; offset += 8
+            m_count = struct.unpack(">I", data[offset:offset + 4])[0]; offset += 4
+
+            measurements = []
+            for _ in range(m_count):
+                m_len = struct.unpack(">I", data[offset:offset + 4])[0]; offset += 4
+                m_bytes = data[offset:offset + m_len]; offset += m_len
+                m = RTTMeasurement.from_bytes(m_bytes) if hasattr(RTTMeasurement, 'from_bytes') else None
+                if m is not None:
+                    measurements.append(m)
+
+            # Commitment data follows
+            c_len = struct.unpack(">I", data[offset:offset + 4])[0]; offset += 4
+            c_data = data[offset:offset + c_len]; offset += c_len
+            commitment = self._deserialize_commitment(c_data) if hasattr(self, '_deserialize_commitment') else None
+
+            # Reconstruct commitment hash from measurements
+            from src.crypto import sha3_256
+            sorted_hashes = sorted(m.commitment() for m in measurements)
+            commitment_hash = sha3_256(b"".join(sorted_hashes))
+
+            return MeasurementReveal(
+                validator_id=validator_id,
+                epoch=epoch,
+                measurements=measurements,
+                commitment_hash=commitment_hash
+            )
+        except Exception:
+            return None
 
     def _serialize_proposal(self, p: ConsensusProposal) -> bytes:
         parts = [
