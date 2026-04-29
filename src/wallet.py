@@ -386,35 +386,27 @@ class Wallet:
         if total_input < amount + fee:
             return None  # Insufficient funds
         
-        # Build inputs
-        inputs = []
-        signing_keys = []
-        
-        for utxo in utxos:
-            keypair = self.key_manager.get_unused_keypair(self.current_epoch)
-            signing_keys.append(keypair)
-            
-            inp = TxInput(
-                prev_tx_hash=utxo.tx_hash,
-                output_index=utxo.output_index,
-                signature=b"",  # Will sign later
-                public_key=keypair.public_key
-            )
-            inputs.append(inp)
-        
-        # Build outputs
+        # Build outputs first (needed for signing hash)
         outputs = [
             TxOutput(value=amount, address=recipient)
         ]
-        
-        # Add change output if needed
+
+        # Change goes back to our static wallet address (not a legacy derived address)
         change = total_input - amount - fee
         if change >= DUST_THRESHOLD:
-            # Generate fresh address for change
-            change_keypair = self.key_manager.generate_keypair(self.current_epoch)
-            outputs.append(TxOutput(value=change, address=change_keypair.address))
-        
-        # Create transaction
+            outputs.append(TxOutput(value=change, address=self.address))
+
+        # Build inputs -- use temporal auth for registered wallets
+        inputs = []
+        for utxo in utxos:
+            inputs.append(TxInput(
+                prev_tx_hash=utxo.tx_hash,
+                output_index=utxo.output_index,
+                signature=b"",
+                public_key=b""
+            ))
+
+        # Create transaction shell for signing hash
         tx = Transaction(
             version=1,
             tx_type=TxType.TRANSFER,
@@ -424,12 +416,28 @@ class Wallet:
             timestamp=int(time.time() * 1000),
             fee=fee
         )
-        
-        # Sign inputs
+
+        # Sign each input with temporal auth (includes Merkle proof)
         signing_hash = tx.signing_hash()
-        for i, (inp, keypair) in enumerate(zip(tx.inputs, signing_keys)):
-            inp.signature = self.key_manager.sign(signing_hash, keypair)
-        
+        if self.key_manager.is_registered:
+            for inp in tx.inputs:
+                sig, pub, proof, idx = self.key_manager.temporal_sign(signing_hash)
+                inp.signature = sig
+                inp.public_key = pub
+                inp.auth_proof = proof
+                inp.auth_key_index = idx
+        else:
+            # Unregistered: legacy keypair signing (no auth proof)
+            for inp in tx.inputs:
+                keypair = self.key_manager.get_unused_keypair(self.current_epoch)
+                inp.public_key = keypair.public_key
+                inp.signature = self.key_manager.sign(signing_hash, keypair)
+
+        # Recalculate fee based on actual tx size
+        actual_fee = tx.size * self.config.fee_rate
+        if actual_fee > fee:
+            tx.fee = actual_fee
+
         return tx
     
     def create_stake(self, amount: int, 
@@ -833,62 +841,5 @@ class Wallet:
         return cls(config)
 
 
-# =============================================================================
-# MULTI-WALLET MANAGER
-# =============================================================================
-
-class WalletManager:
-    """
-    Manages multiple wallets
-    """
-    
-    def __init__(self, data_dir: str = "./wallets"):
-        self.data_dir = Path(data_dir)
-        self.data_dir.mkdir(exist_ok=True)
-        
-        self.wallets: Dict[str, Wallet] = {}
-        self.active_wallet: Optional[str] = None
-    
-    def create_wallet(self, name: str, password: bytes) -> Wallet:
-        """Create and save a new wallet"""
-        config = WalletConfig(name=name)
-        wallet = Wallet.create_new(config)
-        
-        # Save encrypted seed
-        encrypted = wallet.export_encrypted(password)
-        wallet_file = self.data_dir / f"{name}.wallet"
-        wallet_file.write_bytes(encrypted)
-        
-        self.wallets[name] = wallet
-        if self.active_wallet is None:
-            self.active_wallet = name
-        
-        return wallet
-    
-    def load_wallet(self, name: str, password: bytes) -> Wallet:
-        """Load wallet from file"""
-        wallet_file = self.data_dir / f"{name}.wallet"
-        if not wallet_file.exists():
-            raise FileNotFoundError(f"Wallet not found: {name}")
-        
-        encrypted = wallet_file.read_bytes()
-        config = WalletConfig(name=name)
-        wallet = Wallet.from_encrypted(encrypted, password, config)
-        
-        self.wallets[name] = wallet
-        return wallet
-    
-    def list_wallets(self) -> List[str]:
-        """List available wallets"""
-        return [f.stem for f in self.data_dir.glob("*.wallet")]
-    
-    def get_active_wallet(self) -> Optional[Wallet]:
-        """Get currently active wallet"""
-        if self.active_wallet:
-            return self.wallets.get(self.active_wallet)
-        return None
-    
-    def set_active_wallet(self, name: str) -> None:
-        """Set active wallet"""
-        if name in self.wallets:
-            self.active_wallet = name
+    # WalletManager removed -- wallet persistence requires encrypted storage
+    # implementation. Forward secrecy by design: no seed export.

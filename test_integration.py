@@ -20,7 +20,7 @@ from src.transaction import (
     Transaction, TxInput, TxOutput, TxType,
     UTXOSet, TransactionValidator, Mempool, AuthRegistry
 )
-from src.wallet import Wallet, WalletConfig, WalletManager, KeyManager
+from src.wallet import Wallet, WalletConfig, KeyManager
 from src.storage import StorageManager, BlockStore, TransactionStore, StateDB
 from src.consensus import ConsensusBlock, ConsensusProposal
 from src.network import create_testnet

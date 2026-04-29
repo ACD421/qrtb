@@ -464,13 +464,15 @@ class SlashingProposal:
     reason: str
     evidence_hash: bytes
     proposer_id: bytes
-    supporting_votes: int = 0
+    supporting_stake: int = 0
+    voters: Set[bytes] = field(default_factory=set)
     executed: bool = False
 
 
 class SlashingManager:
     """
-    Manages slashing proposals for detected adversaries
+    Manages slashing proposals for detected adversaries.
+    Uses stake-weighted voting, not raw vote count.
     """
     
     def __init__(self):
@@ -501,27 +503,35 @@ class SlashingManager:
         self.proposals[evidence_hash] = proposal
         return proposal
     
-    def vote_for_slashing(self, evidence_hash: bytes) -> bool:
-        """Vote for a slashing proposal"""
+    def vote_for_slashing(self, evidence_hash: bytes,
+                          voter_id: bytes, voter_stake: int) -> bool:
+        """Vote for a slashing proposal (stake-weighted)."""
         proposal = self.proposals.get(evidence_hash)
         if proposal is None:
             return False
         if proposal.executed:
             return False
-        
-        proposal.supporting_votes += 1
+        if voter_id in proposal.voters:
+            return False  # Already voted
+
+        proposal.voters.add(voter_id)
+        proposal.supporting_stake += voter_stake
         return True
-    
-    def execute_slashing(self, evidence_hash: bytes, threshold: int) -> bool:
-        """Execute slashing if threshold met"""
+
+    def execute_slashing(self, evidence_hash: bytes,
+                         total_stake: int,
+                         threshold: float = BFT_THRESHOLD) -> bool:
+        """Execute slashing if stake-weighted threshold met."""
         proposal = self.proposals.get(evidence_hash)
         if proposal is None:
             return False
         if proposal.executed:
             return False
-        if proposal.supporting_votes < threshold:
+        if total_stake == 0:
             return False
-        
+        if proposal.supporting_stake / total_stake < threshold:
+            return False
+
         proposal.executed = True
         self.slashed_validators.add(proposal.target_id)
         return True

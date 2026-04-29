@@ -47,7 +47,7 @@ from .transaction import (
     UTXOSet, UTXO, TransactionValidator, Mempool
 )
 from .wallet import (
-    Wallet, WalletConfig, WalletManager,
+    Wallet, WalletConfig,
     KeyManager, KeyPair
 )
 from .storage import (

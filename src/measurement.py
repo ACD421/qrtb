@@ -190,10 +190,12 @@ class MeasurementProtocol:
     Implements the commit-reveal measurement protocol
     """
     
-    def __init__(self, validator_id: bytes, location: Tuple[float, float], zone_id: int):
+    def __init__(self, validator_id: bytes, location: Tuple[float, float], zone_id: int,
+                 use_real_measurements: bool = False):
         self.validator_id = validator_id
         self.location = location
         self.zone_id = zone_id
+        self.use_real_measurements = use_real_measurements
         
         self.peers: Dict[bytes, PeerInfo] = {}
         self.current_epoch = 0
@@ -398,3 +400,61 @@ def get_random_location(zone_id: int) -> Tuple[str, Tuple[float, float]]:
     """Get random location within a zone"""
     locations = ZONE_LOCATIONS.get(zone_id, ZONE_LOCATIONS[0])
     return random.choice(locations)
+
+
+# =============================================================================
+# REAL RTT MEASUREMENT (TCP connect timing)
+# =============================================================================
+
+class RealRTTMeasurement:
+    """
+    Measures real RTT to a peer by timing TCP connect (SYN-ACK).
+
+    Used by the Node class when use_real_measurements is True.
+    Falls back gracefully on connection failure.
+    """
+
+    def __init__(self, num_samples: int = 3, timeout: float = 5.0):
+        self.num_samples = num_samples
+        self.timeout = timeout
+
+    async def measure_rtt(self, peer_host: str, peer_port: int) -> float:
+        """
+        Measure RTT to a peer by timing TCP connect + close.
+
+        Performs num_samples connections and returns the median RTT
+        in milliseconds. Raises ConnectionError if all attempts fail.
+        """
+        import asyncio
+
+        samples: List[float] = []
+
+        for _ in range(self.num_samples):
+            t0 = time.perf_counter()
+            try:
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(peer_host, peer_port),
+                    timeout=self.timeout,
+                )
+                t1 = time.perf_counter()
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
+                rtt_ms = (t1 - t0) * 1000.0
+                samples.append(rtt_ms)
+            except (OSError, asyncio.TimeoutError):
+                continue
+
+        if not samples:
+            raise ConnectionError(
+                f"All {self.num_samples} RTT probes to {peer_host}:{peer_port} failed"
+            )
+
+        # Return median to reduce outlier impact
+        samples.sort()
+        mid = len(samples) // 2
+        if len(samples) % 2 == 0:
+            return (samples[mid - 1] + samples[mid]) / 2.0
+        return samples[mid]

@@ -52,10 +52,13 @@ class TxInput:
     output_index: int        # Which output of that tx
     signature: bytes         # WOTS+ signature (2144 bytes)
     public_key: bytes        # WOTS+ public key (2144 bytes)
-    
+    auth_proof: Optional[list] = None  # Merkle proof against auth_root (for temporal auth)
+    auth_key_index: int = -1           # Key index in the temporal auth tree (-1 = not set)
+
     @property
     def size(self) -> int:
-        return 32 + 4 + len(self.signature) + len(self.public_key)
+        proof_size = sum(len(h) for h in self.auth_proof) if self.auth_proof else 0
+        return 32 + 4 + len(self.signature) + len(self.public_key) + proof_size + 4
     
     def to_bytes(self) -> bytes:
         return concat(
@@ -458,21 +461,19 @@ class TransactionValidator:
             if not self.wots.verify(signing_hash, inp.signature, inp.public_key):
                 return False, f"invalid signature for input {inp.prev_tx_hash.hex()[:8]}:{inp.output_index}"
 
-            # Address ownership: require registration and verify public key
-            # is committed under the registered auth root via Merkle proof.
-            # In WOTS+, public keys have no algebraic link to the address --
-            # ownership is proven through the temporal auth tree binding.
+            # Address ownership via temporal auth tree binding.
+            # Registered addresses MUST provide a Merkle proof that the public
+            # key is committed under the on-chain auth_root.
+            # Unregistered addresses (e.g. coinbase recipients) are sig-only.
             owner_addr = utxo.output.address
             if self.auth_registry.is_registered(owner_addr):
                 auth_root = self.auth_registry.get_auth_root(owner_addr)
-                pk_hash = sha3_256(inp.public_key)
-                # If auth_proof is packed into the input (temporal auth path),
-                # verify it. Otherwise accept sig-only for backward compat
-                # with pre-registration UTXOs (e.g. coinbase funding).
-                if hasattr(inp, 'auth_proof') and inp.auth_proof:
-                    from .crypto import MerkleTree
+                if inp.auth_proof is not None and len(inp.auth_proof) > 0:
+                    pk_hash = sha3_256(inp.public_key)
                     if not MerkleTree.verify_proof(pk_hash, inp.auth_proof, auth_root):
                         return False, f"public key not in auth tree for {owner_addr.hex()[:16]}"
+                else:
+                    return False, f"registered address requires temporal auth proof for {owner_addr.hex()[:16]}"
             
             total_input += utxo.output.value
         

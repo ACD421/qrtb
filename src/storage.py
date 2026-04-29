@@ -37,17 +37,18 @@ class StoredBlock:
     raw_data: bytes
     
     @classmethod
-    def from_consensus_block(cls, block: ConsensusBlock, 
-                             tx_hashes: List[bytes]) -> 'StoredBlock':
+    def from_consensus_block(cls, block: ConsensusBlock,
+                             tx_hashes: List[bytes],
+                             prev_block_hash: Optional[bytes] = None) -> 'StoredBlock':
         return cls(
             epoch=block.epoch,
             block_hash=block.block_hash,
-            prev_hash=b'\x00' * 32,  # Link to previous
+            prev_hash=prev_block_hash or b'\x00' * 32,
             merkle_root=block.proposal.measurement_root,
             timestamp=int(block.finalization_time * 1000),
             proposer_id=block.proposal.proposer_id,
             transactions=tx_hashes,
-            raw_data=b""  # Serialized full block
+            raw_data=b""
         )
 
 
@@ -101,10 +102,11 @@ class BlockStore:
         try:
             with self.conn:
                 self.conn.execute("""
-                    INSERT OR REPLACE INTO blocks 
-                    (epoch, block_hash, prev_hash, merkle_root, timestamp, 
+                    INSERT INTO blocks
+                    (epoch, block_hash, prev_hash, merkle_root, timestamp,
                      proposer_id, tx_count, raw_data)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(epoch) DO NOTHING
                 """, (
                     block.epoch,
                     block.block_hash,
@@ -632,8 +634,12 @@ class StorageManager:
                         inp.prev_tx_hash, inp.output_index, tx.tx_hash
                     )
             
-            # Store block
-            stored_block = StoredBlock.from_consensus_block(block, tx_hashes)
+            # Chain linking: get previous block hash
+            prev = self.blocks.get_latest_block()
+            prev_hash = prev.block_hash if prev else None
+
+            # Store block with chain link
+            stored_block = StoredBlock.from_consensus_block(block, tx_hashes, prev_hash)
             self.blocks.store_block(stored_block)
             
             # Update chain state
@@ -654,10 +660,32 @@ class StorageManager:
         }
     
     def rebuild_utxo_set(self) -> None:
-        """Rebuild UTXO set from stored transactions"""
-        # This would scan all transactions and rebuild
-        # Expensive but necessary for recovery
-        pass
+        """Rebuild UTXO set from stored transactions.
+        Scans all blocks in order, replays tx outputs as UTXOs,
+        marks spent inputs. Used for crash recovery.
+        """
+        self.utxo_set = UTXOSet()
+        height = self.blocks.get_chain_height()
+
+        for epoch in range(height + 1):
+            block = self.blocks.get_block(epoch)
+            if block is None:
+                continue
+
+            for tx_hash_bytes in block.transactions:
+                tx_data = self.transactions.get_transaction(tx_hash_bytes)
+                if tx_data is None:
+                    continue
+
+                # Add outputs as UTXOs
+                outputs = self.transactions.get_outputs(tx_hash_bytes)
+                for idx, out in enumerate(outputs):
+                    self.utxo_set.add_utxo(tx_hash_bytes, idx, out, epoch)
+
+                # Mark inputs as spent
+                inputs = self.transactions.get_inputs(tx_hash_bytes)
+                for inp_hash, inp_idx in inputs:
+                    self.utxo_set.spend_utxo(inp_hash, inp_idx, tx_hash_bytes)
     
     def close(self):
         """Close all database connections."""
