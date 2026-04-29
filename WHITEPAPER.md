@@ -67,16 +67,25 @@ QRTB does not defend against quantum computers. Quantum computers are irrelevant
 
 **Grover's algorithm** provides a quadratic speedup for unstructured search, reducing SHA3-256 pre-image resistance from 2^256 to 2^128 operations. At 1 microsecond per quantum oracle query (each requiring a full Keccak-f[1600] quantum circuit on 10,000--40,000 logical qubits, or 10--400 million physical qubits at current error correction ratios):
 
-| Attack | Operations | Time | Universe Lifetimes |
-|---|---|---|---|
-| Forge 1 WOTS+ signature | 2^128 | 3.4 x 10^32 s | 790 trillion |
-| Forge Merkle proof (BHT) | 2^85 | 3.9 x 10^19 s | 90 |
-| Reverse batch seed chain | 2^256 | 1.16 x 10^71 s | 10^53 |
-| Recover address from hash | 2^256 | 1.16 x 10^71 s | 10^53 |
+**Qubit budget per Grover oracle (SHA3-256 circuit):**
 
-The weakest link (Merkle collision via Brassard-Hoyer-Tapp at 2^85) requires 90 universe lifetimes on a fault-tolerant quantum computer with 10--400 million physical qubits. No such machine exists. Current state of the art (2026): approximately 1,000 noisy qubits, no fault tolerance.
+Implementing SHA3-256 as a reversible quantum circuit requires: 256-qubit input register, 1,600-qubit Keccak state, ~2,000 ancilla for reversible chi/theta/rho steps across 24 rounds, 256-qubit comparison register. Total: **~6,000 logical qubits per machine.** At current surface code error rates (10^-3), this requires **~6 million physical qubits per machine.**
 
-Even with 1 million parallel fault-tolerant quantum computers, forging a single WOTS+ signature requires 790 million universe lifetimes. This is not a security margin -- it is physical impossibility.
+Each Grover oracle query executes ~24,000 T-gates (24 Keccak rounds) at ~100 milliseconds per query on surface code.
+
+**Qubit requirements within QRTB's protocol timing windows:**
+
+QRTB's commit-reveal window is 60 seconds. An adversary must complete the quantum attack within this window to adapt measurements or forge signatures before finalization.
+
+| Attack | Window | Parallel Machines Needed | Qubits per Machine | Total Qubits | Gap from Today (~1,200) |
+|---|---|---|---|---|---|
+| Forge Merkle proof | 60s | 4.13 x 10^45 | 6M | 2.48 x 10^52 | 10^49 x (246 years at current doubling) |
+| Forge WOTS+ signature | 15 min | 1.43 x 10^69 | 6M | 8.6 x 10^75 | 10^72 x (360 years) |
+| Break commitment | 60s | 3.21 x 10^71 | 6M | 1.93 x 10^78 | 10^75 x (375 years) |
+
+Observable universe: ~10^80 atoms. Breaking a commitment within the 60-second window requires converting 1.9% of all matter in the observable universe into fault-tolerant quantum hardware.
+
+Current state (2026): ~1,200 noisy qubits, zero fault-tolerant logical qubits. First useful fault-tolerant computation estimated 2030-2035. The gap between today and the weakest attack (Merkle collision) is 49 orders of magnitude -- approximately 246 years at the current qubit doubling rate of ~1.5 years per doubling. Doubling rates will plateau long before approaching these scales.
 
 ### 2.2 Network Adversary
 
