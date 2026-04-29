@@ -9,9 +9,23 @@ QRTB Cryptographic Primitives
 import hashlib
 import secrets
 import struct
+import ctypes
 from dataclasses import dataclass
 from typing import Tuple, Optional
 import os
+
+
+def _secure_wipe(data: bytes) -> None:
+    """Overwrite bytes object in memory. Best-effort on CPython --
+    works because CPython bytes have a contiguous internal buffer.
+    Not guaranteed on alternative runtimes."""
+    if not data:
+        return
+    try:
+        buf = (ctypes.c_char * len(data)).from_address(id(data) + bytes.__basicsize__ - 1)
+        ctypes.memset(buf, 0, len(data))
+    except Exception:
+        pass  # Fallback: GC will eventually reclaim
 
 # =============================================================================
 # HASH FUNCTIONS
@@ -196,23 +210,21 @@ class TemporalKey:
     current_key: bytes      # Current epoch's key material
     epoch: int              # Current epoch number
     address: bytes          # Static on-chain address
-    _initial_seed: bytes    # For key regeneration (would be in TAM)
-    
+
     @classmethod
     def create(cls, seed: Optional[bytes] = None) -> 'TemporalKey':
         """Create new temporal key with random or provided seed"""
         if seed is None:
             seed = secure_random(64)
-        
+
         # Double-hash for address: H(H(seed))
         inner = sha3_512(concat(b"address_inner", seed))
         address = sha3_512(concat(b"address_outer", inner))
-        
+
         return cls(
             current_key=seed,
             epoch=0,
-            address=address,
-            _initial_seed=seed
+            address=address
         )
     
     def evolve(self, epoch_entropy: bytes) -> None:
@@ -229,13 +241,8 @@ class TemporalKey:
         return wots.keygen(self.current_key)
     
     def destroy_previous(self) -> None:
-        """
-        Securely destroy previous key material
-        DOD 5220.22-M: Overwrite with random data
-        """
-        # In production: Use secure memory wiping
-        # This is symbolic - actual implementation needs OS-level secure erase
-        pass
+        """Securely destroy previous key material via ctypes memset."""
+        _secure_wipe(self.current_key)
 
 # =============================================================================
 # MERKLE TREE FOR EPOCH COMMITMENTS
@@ -364,8 +371,11 @@ class TemporalAuthTree:
         self._auth_tree = MerkleTree(pub_keys)
 
     def _derive_key_seed(self, index: int) -> bytes:
-        """Derive the seed for key at given index within this batch."""
-        return sha3_512(concat(self._batch_seed, b"key", index))
+        """Derive the seed for key at given index within this batch.
+        Format: SHA3-512("key_seed" || batch_seed || index_BE8)
+        Must match native Rust/C implementations exactly.
+        """
+        return sha3_512(concat(b"key_seed", self._batch_seed, index))
 
     @property
     def auth_root(self) -> bytes:
@@ -406,8 +416,9 @@ class TemporalAuthTree:
         signature = self.wots.sign(message, priv)
         proof = self._auth_tree.get_proof(idx)
 
-        # Wipe private key material
-        priv = b'\x00' * len(priv)
+        # Wipe private key material in place
+        _secure_wipe(priv)
+        _secure_wipe(key_seed)
 
         return signature, pub, proof, idx
 
@@ -433,8 +444,9 @@ class TemporalAuthTree:
         signature = self.wots.sign(message, priv)
         proof = self._auth_tree.get_proof(idx)
 
-        # Wipe private key material
-        priv = b'\x00' * len(priv)
+        # Wipe private key material in place
+        _secure_wipe(priv)
+        _secure_wipe(key_seed)
 
         return signature, pub, proof, idx
 
@@ -476,8 +488,7 @@ class TemporalAuthTree:
         Called after deriving the next batch seed.
         """
         if self._batch_seed:
-            # Overwrite with random data then zero
-            self._batch_seed = os.urandom(len(self._batch_seed))
+            _secure_wipe(self._batch_seed)
             self._batch_seed = b'\x00' * 64
         self._auth_tree = None
 

@@ -109,7 +109,7 @@ def test_detection_engine():
     
     print(f"  Honest validator flagged: {honest_result.is_suspicious}")
     print(f"  Adversary validator flagged: {adversary_result.is_suspicious}")
-    print(f"  Adversary ratio score: {adversary_result.ratio_score:.2f}σ")
+    print(f"  Adversary ratio score: {adversary_result.ratio_score:.2f} sigma")
     
     # Correct detection: adversary flagged, honest not flagged
     correct = adversary_result.is_suspicious and not honest_result.is_suspicious

@@ -196,6 +196,7 @@ class BlockProducer:
         proposal = ConsensusProposal(
             epoch=template.epoch,
             proposer_id=self.validator_id,
+            round=0,
             measurement_root=measurement_root,
             timestamp=time.time()
         )

@@ -223,23 +223,29 @@ class ShardedUTXOSet:
     def spend_utxo(self, tx_hash: bytes, output_index: int,
                   spending_tx: bytes,
                   address_hint: Optional[bytes] = None) -> Optional[UTXO]:
-        """Mark UTXO as spent"""
+        """Mark UTXO as spent.
+        Lock order: shard lock first, then address lock AFTER releasing shard lock.
+        get_balance takes address_lock then calls get_utxo (shard lock).
+        Nesting shard->address here would invert that order and deadlock.
+        """
         shard_id = self._get_shard(tx_hash)
         key = (tx_hash, output_index)
-        
+
+        utxo = None
         with self.locks[shard_id]:
             utxo = self.shards[shard_id].get(key)
             if utxo and not utxo.is_spent:
                 utxo.is_spent = True
                 utxo.spent_by = spending_tx
-                
-                # Remove from address index
-                with self.address_lock:
-                    self.by_address[utxo.output.address].discard(key)
-                
-                return utxo
-        
-        return None
+            else:
+                return None
+
+        # Remove from address index outside shard lock.
+        # Briefly stale index is safe: get_balance rechecks is_spent.
+        with self.address_lock:
+            self.by_address[utxo.output.address].discard(key)
+
+        return utxo
     
     def batch_lookup(self, refs: List[Tuple[bytes, int, Optional[bytes]]]
                     ) -> List[Optional[UTXO]]:

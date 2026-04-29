@@ -8,6 +8,11 @@ sha3 = "0.10"
 hex = "0.4"
 rand = "0.8"
 zeroize = "1.7"
+rayon = "1.10"
+
+[[bin]]
+name = "bench_tps"
+path = "src/bench_tps.rs"
 
 [build-dependencies]
 cc = "1.0"

@@ -235,10 +235,10 @@ class MeasurementProtocol:
         if len(available) < num_targets:
             num_targets = len(available)
         
-        # Deterministic shuffle based on epoch + validator ID
+        # Deterministic shuffle using local PRNG (avoids corrupting global state)
         seed = sha3_256(concat(self.validator_id, self.current_epoch))
-        random.seed(int.from_bytes(seed[:8], 'big'))
-        random.shuffle(available)
+        local_rng = random.Random(int.from_bytes(seed[:8], 'big'))
+        local_rng.shuffle(available)
         
         self.selected_targets = available[:num_targets]
         return self.selected_targets

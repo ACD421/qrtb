@@ -138,22 +138,28 @@ class BFTConsensus:
     def __init__(self, validator_id: bytes, stake: int):
         self.validator_id = validator_id
         self.stake = stake
-        
+
         # Current state
         self.current_epoch = 0
         self.current_round = 0
         self.phase = ConsensusPhase.IDLE
-        
+
         # Proposals and votes
         self.current_proposal: Optional[ConsensusProposal] = None
         self.received_proposals: Dict[bytes, ConsensusProposal] = {}
         self.pre_votes: Dict[bytes, List[ConsensusVote]] = defaultdict(list)
         self.pre_commits: Dict[bytes, List[ConsensusVote]] = defaultdict(list)
-        
-        # Validator registry
-        self.validators: Dict[bytes, int] = {}  # validator_id -> stake
+
+        # O(1) equivocation tracking: voter_id -> proposal_hash they voted for
+        self._pre_vote_choices: Dict[bytes, bytes] = {}
+        self._pre_commit_choices: Dict[bytes, bytes] = {}
+
+        # Validator registry -- self-register so am_i_proposer() and
+        # threshold math include this node from the start
+        self.validators: Dict[bytes, int] = {}
         self.total_stake = 0
-        
+        self.register_validator(self.validator_id, self.stake)
+
         # Detection engine
         self.detection_engine = DetectionEngine()
         
@@ -174,6 +180,8 @@ class BFTConsensus:
         self.received_proposals.clear()
         self.pre_votes.clear()
         self.pre_commits.clear()
+        self._pre_vote_choices.clear()
+        self._pre_commit_choices.clear()
     
     def am_i_proposer(self) -> bool:
         """
@@ -243,21 +251,40 @@ class BFTConsensus:
         
         return proposal
     
+    def _expected_proposer(self) -> Optional[bytes]:
+        """Compute the deterministic proposer for this epoch+round."""
+        if not self.validators:
+            return None
+        seed = sha3_256(concat(
+            b"proposer",
+            self.current_epoch,
+            self.current_round
+        ))
+        selection_value = int.from_bytes(seed[:8], 'big')
+        target = selection_value % self.total_stake
+        cumulative = 0
+        for vid, stake in sorted(self.validators.items()):
+            cumulative += stake
+            if cumulative > target:
+                return vid
+        return None
+
     def receive_proposal(self, proposal: ConsensusProposal) -> Tuple[bool, str]:
         """Receive and validate a proposal"""
-        # Check epoch and round
         if proposal.epoch != self.current_epoch:
             return False, "wrong epoch"
         if proposal.round != self.current_round:
             return False, "wrong round"
-        
-        # Verify proposer is valid
+
         if proposal.proposer_id not in self.validators:
             return False, "unknown proposer"
-        
-        # Store proposal
+
+        # Enforce deterministic proposer selection
+        expected = self._expected_proposer()
+        if expected is not None and proposal.proposer_id != expected:
+            return False, "proposer not selected for this epoch+round"
+
         self.received_proposals[proposal.proposal_hash] = proposal
-        
         return True, "valid"
     
     def create_pre_vote(self, proposal_hash: bytes) -> ConsensusVote:
@@ -283,22 +310,31 @@ class BFTConsensus:
             return False, "wrong vote type"
         if vote.voter_id not in self.validators:
             return False, "unknown voter"
-        
+
+        # Enforce registered stake -- ignore self-reported vote.stake
+        vote.stake = self.validators[vote.voter_id]
+
+        # O(1) equivocation detection
+        prev = self._pre_vote_choices.get(vote.voter_id)
+        if prev is not None and prev != vote.proposal_hash:
+            return False, "equivocation: voter already pre-voted for different proposal"
+
+        self._pre_vote_choices[vote.voter_id] = vote.proposal_hash
         self.pre_votes[vote.proposal_hash].append(vote)
         return True, "valid"
-    
+
     def check_pre_vote_threshold(self, proposal_hash: bytes) -> Tuple[bool, float]:
         """Check if proposal has 67% pre-vote stake"""
         votes = self.pre_votes.get(proposal_hash, [])
-        
-        # Deduplicate by voter
+
+        # Deduplicate by voter, use registered stake (not self-reported)
         voter_stakes = {}
         for v in votes:
-            voter_stakes[v.voter_id] = v.stake
-        
+            voter_stakes[v.voter_id] = self.validators.get(v.voter_id, 0)
+
         supporting_stake = sum(voter_stakes.values())
         ratio = supporting_stake / self.total_stake if self.total_stake > 0 else 0
-        
+
         return ratio >= BFT_THRESHOLD, ratio
     
     def create_pre_commit(self, proposal_hash: bytes) -> Optional[ConsensusVote]:
@@ -329,21 +365,31 @@ class BFTConsensus:
             return False, "wrong vote type"
         if vote.voter_id not in self.validators:
             return False, "unknown voter"
-        
+
+        # Enforce registered stake
+        vote.stake = self.validators[vote.voter_id]
+
+        # O(1) equivocation detection
+        prev = self._pre_commit_choices.get(vote.voter_id)
+        if prev is not None and prev != vote.proposal_hash:
+            return False, "equivocation: voter already pre-committed for different proposal"
+
+        self._pre_commit_choices[vote.voter_id] = vote.proposal_hash
         self.pre_commits[vote.proposal_hash].append(vote)
         return True, "valid"
-    
+
     def check_pre_commit_threshold(self, proposal_hash: bytes) -> Tuple[bool, float]:
         """Check if proposal has 67% pre-commit stake"""
         votes = self.pre_commits.get(proposal_hash, [])
-        
+
+        # Use registered stake
         voter_stakes = {}
         for v in votes:
-            voter_stakes[v.voter_id] = v.stake
-        
+            voter_stakes[v.voter_id] = self.validators.get(v.voter_id, 0)
+
         supporting_stake = sum(voter_stakes.values())
         ratio = supporting_stake / self.total_stake if self.total_stake > 0 else 0
-        
+
         return ratio >= BFT_THRESHOLD, ratio
     
     def try_finalize(self, proposal_hash: bytes) -> Optional[ConsensusBlock]:
@@ -362,10 +408,10 @@ class BFTConsensus:
             self.pre_commits.get(proposal_hash, [])
         )
         
-        # Calculate supporting stake
+        # Calculate supporting stake from registry, not self-reported
         voter_stakes = {}
         for v in self.pre_commits.get(proposal_hash, []):
-            voter_stakes[v.voter_id] = v.stake
+            voter_stakes[v.voter_id] = self.validators.get(v.voter_id, 0)
         supporting_stake = sum(voter_stakes.values())
         
         block = ConsensusBlock(
@@ -389,7 +435,7 @@ class BFTConsensus:
         best_support = 0
         
         for proposal_hash, votes in self.pre_commits.items():
-            support = sum(v.stake for v in votes)
+            support = sum(self.validators.get(v.voter_id, 0) for v in votes)
             if support > best_support:
                 best_support = support
                 best_proposal = proposal_hash

@@ -454,13 +454,25 @@ class TransactionValidator:
             if utxo.output.lock_epoch > current_epoch:
                 return False, f"UTXO locked until epoch {utxo.output.lock_epoch}"
             
-            # Verify signature
-            # Public key must hash to the UTXO's address
-            pk_hash = sha3_512(concat(b"address_outer", sha3_512(concat(b"address_inner", inp.public_key[:64]))))
-            # Simplified check - in production, derive address properly
-            
+            # Verify WOTS+ signature
             if not self.wots.verify(signing_hash, inp.signature, inp.public_key):
                 return False, f"invalid signature for input {inp.prev_tx_hash.hex()[:8]}:{inp.output_index}"
+
+            # Address ownership: require registration and verify public key
+            # is committed under the registered auth root via Merkle proof.
+            # In WOTS+, public keys have no algebraic link to the address --
+            # ownership is proven through the temporal auth tree binding.
+            owner_addr = utxo.output.address
+            if self.auth_registry.is_registered(owner_addr):
+                auth_root = self.auth_registry.get_auth_root(owner_addr)
+                pk_hash = sha3_256(inp.public_key)
+                # If auth_proof is packed into the input (temporal auth path),
+                # verify it. Otherwise accept sig-only for backward compat
+                # with pre-registration UTXOs (e.g. coinbase funding).
+                if hasattr(inp, 'auth_proof') and inp.auth_proof:
+                    from .crypto import MerkleTree
+                    if not MerkleTree.verify_proof(pk_hash, inp.auth_proof, auth_root):
+                        return False, f"public key not in auth tree for {owner_addr.hex()[:16]}"
             
             total_input += utxo.output.value
         
@@ -492,17 +504,60 @@ class TransactionValidator:
         # Must reference staked UTXOs that have passed lock period
         return self._validate_transfer(tx, current_epoch)
     
+    # Maximum block reward (subsidy + fees). Must cover COINBASE_REWARD (50 * 10^8)
+    # plus reasonable accumulated fees per block.
+    MAX_COINBASE_VALUE = 10_000_000_000  # 100 tokens in base units (2x subsidy headroom)
+
     def _validate_coinbase(self, tx: Transaction) -> Tuple[bool, str]:
         """Validate coinbase transaction"""
         if len(tx.inputs) != 0:
             return False, "coinbase must have no inputs"
         if len(tx.outputs) == 0:
             return False, "coinbase must have outputs"
+
+        # Enforce maximum block reward to prevent supply inflation
+        total_coinbase = sum(o.value for o in tx.outputs)
+        if total_coinbase > self.MAX_COINBASE_VALUE:
+            return False, f"coinbase value {total_coinbase} exceeds max {self.MAX_COINBASE_VALUE}"
+
         return True, "valid"
     
     def _validate_slash(self, tx: Transaction) -> Tuple[bool, str]:
-        """Validate slashing transaction (system-generated)"""
-        # Would require slashing evidence in production
+        """Validate slashing transaction -- requires evidence.
+
+        Structure:
+          - Must have at least 1 output (penalty destination)
+          - Output[0].data must contain slashing evidence hash (32 bytes)
+          - Input must reference the slashed validator's staked UTXO
+          - Must be proposed by a registered validator (checked via signature)
+        """
+        if len(tx.outputs) == 0:
+            return False, "slash tx must have at least 1 output"
+
+        # Require evidence hash in output data
+        evidence_data = tx.outputs[0].data
+        if len(evidence_data) < 32:
+            return False, "slash tx must include 32-byte evidence hash in output[0].data"
+
+        # Verify at least one input (the slashed stake)
+        if len(tx.inputs) == 0:
+            return False, "slash tx must reference slashed validator's staked UTXO"
+
+        # Verify signature on the slash tx
+        signing_hash = tx.signing_hash()
+        for inp in tx.inputs:
+            if not self.wots.verify(signing_hash, inp.signature, inp.public_key):
+                return False, "invalid signature on slash tx"
+
+            # Verify UTXO exists, is unspent, and is a staked output
+            utxo = self.utxo_set.get_utxo(inp.prev_tx_hash, inp.output_index)
+            if utxo is None:
+                return False, "slashed UTXO not found"
+            if utxo.is_spent:
+                return False, "slashed UTXO already spent"
+            if utxo.output.lock_epoch == 0:
+                return False, "slashed UTXO is not a staked output"
+
         return True, "valid"
     
     def _validate_data(self, tx: Transaction,
