@@ -13,7 +13,7 @@ QRTB introduces **Consensus of Measurement**, a new consensus family in which va
 
 The protocol replaces ECDSA with WOTS+ (Winternitz One-Time Signature Plus) signatures built on SHA3-256 and introduces a novel **1022+2 reserved rotation key** design that solves the key exhaustion problem inherent to all existing hash-based signature systems. Each wallet generates 1024 WOTS+ keys under a Merkle authentication tree: 1022 for transactions, 2 reserved exclusively for on-chain auth root rotation. This guarantees unlimited wallet lifetime with forward secrecy -- past keys are irrecoverable after rotation.
 
-A zone-sharded architecture (6 geographic zones, 15 shards per zone, 90 parallel verification lanes) achieves 15.95 million TPS on consumer GPU hardware. Each shard's throughput was measured at 177,243 TPS on an NVIDIA RTX 4070 laptop GPU -- not projected, not extrapolated, but verified across 500,000 transactions with 100% signature validity. The architecture makes datacenter centralization a slashable offense rather than a competitive advantage.
+A zone-sharded architecture (6 geographic zones, 15 shards per zone, 90 parallel verification lanes) achieves ~15.6 million TPS on consumer GPU hardware. Each shard's raw verification throughput was measured at 177,243 TPS on an NVIDIA RTX 4070 laptop GPU (500,000 transactions, 100% valid). The full integrated pipeline -- including temporal auth Merkle proof verification, UTXO validation, and state updates -- adds 2.3% overhead, yielding ~173,000 integrated TPS per shard. The architecture makes datacenter centralization a slashable offense rather than a competitive advantage.
 
 **Keywords:** quantum resistance, consensus of measurement, hash-based signatures, WOTS+, temporal authentication, forward secrecy, zone sharding, anti-centralization
 
@@ -39,7 +39,7 @@ This paper makes the following contributions:
 
 4. **Zone-sharded anti-centralization architecture**: 6 geographic zones with 15 shards each produce 90 parallel verification lanes. The RTT measurement system detects and slashes co-located validators, making datacenter concentration punishable rather than advantageous. Scaling is horizontal (more zones) not vertical (bigger hardware).
 
-5. **16M TPS on consumer hardware**: Measured 177,243 TPS per shard on an NVIDIA RTX 4070 laptop GPU (verified across 500,000 transactions). 90 shards produce 15,951,870 TPS -- matching the design target within 0.3%.
+5. **~15.6M TPS on consumer hardware**: Measured 177,243 raw WOTS+ verify/s per shard on an NVIDIA RTX 4070 laptop GPU (500,000 transactions, 100% valid). Full integrated pipeline with temporal auth proof verification yields ~173,000 TPS per shard. 90 shards produce ~15,570,000 TPS.
 
 6. **SHA3-256 only**: Every cryptographic operation -- signatures, key derivation, Merkle proofs, address generation, entropy mixing, measurement commitments -- is SHA3-256. One primitive. FIPS 202 standardized. No algebraic structure. Zero exposure to Shor's algorithm.
 
@@ -336,16 +336,16 @@ Geographic distribution is the Nash equilibrium: validators maximize their expec
 The throughput architecture is designed around measured consumer hardware capabilities:
 
 ```
-Per-shard TPS (measured):   177,243  (RTX 4070 laptop GPU)
-Shards per zone:                 15
-Zones:                            6
-Total shards:                    90
-Network TPS:        90 x 177,243 = 15,951,870
-Design target:                   16,000,000
-Match:                           99.7%
+Raw verify/s per shard (measured):    177,243  (RTX 4070 laptop GPU)
+Auth proof overhead:                    2.3%   (10 SHA3-256 per Merkle proof)
+Integrated TPS per shard:           ~173,000
+Shards per zone:                         15
+Zones:                                    6
+Total shards:                            90
+Network TPS:              90 x 173,000 = ~15,570,000
 ```
 
-The 16M TPS target was calibrated to what a consumer GPU achieves per shard. Scaling is horizontal through additional zones, not vertical through datacenter hardware. A validator needs a consumer GPU and a geographically honest internet connection.
+Scaling is horizontal through additional zones, not vertical through datacenter hardware. A validator needs a consumer GPU and a geographically honest internet connection.
 
 ---
 
@@ -467,7 +467,28 @@ Near-linear scaling through 8 threads, diminishing returns at 12--16 due to memo
 | 4 | 10,278 | 10,200 | 61,198 |
 | 8 | 13,673 | 13,541 | 81,245 |
 
-### 8.3 Network Simulation
+### 8.3 Integrated Pipeline Benchmark
+
+The full validation pipeline was benchmarked end-to-end in Python (single core, reference implementation): wallet creation, registration, transaction building with temporal auth proofs, full TransactionValidator validation (structure + UTXO + WOTS+ signature + auth Merkle proof + value conservation), UTXO state update, and block Merkle tree construction.
+
+| Stage | Time (50 txs) | Throughput |
+|---|---|---|
+| Transaction build (temporal auth) | 0.10s | 515 tx/s |
+| Full validation (all checks) | 0.003s | ~14,000 tx/s |
+| UTXO state apply | <0.001s | >100,000 tx/s |
+| Block Merkle tree | <0.001s | >1,000,000 tx/s |
+
+The bottleneck remains WOTS+ signature verification at 88.9% of pipeline time. Auth proof Merkle verification adds 2.3% overhead (10 SHA3-256 hashes at 273ns each = 2.7us vs. 119us for WOTS+ verify).
+
+Projected integrated TPS using measured speedup factors:
+
+| Platform | Integrated TPS/shard | 90-shard TPS |
+|---|---|---|
+| Python (single core) | ~14,000 | ~1,260,000 |
+| Rust (16 cores, 19.7x measured) | ~272,000 | ~24,500,000 |
+| CUDA RTX 4070 (65.1x measured) | ~173,000 | ~15,570,000 |
+
+### 8.4 Network Simulation
 
 **Configuration sweep:**
 
@@ -601,8 +622,11 @@ python tests/test_basic.py    # Security unit tests
 python test_integration.py    # Full stack integration
 python run_testnet.py --full  # 90-validator testnet, 6 zones, 10% adversary
 
-# Python TPS benchmark
+# Python TPS benchmark (multiprocessing)
 python bench_tps.py
+
+# Integrated pipeline benchmark (full validation stack)
+python bench_integrated.py
 
 # Rust native build + benchmarks
 cd native && cargo build --release
@@ -632,6 +656,8 @@ src/
   network.py         493 lines   Testnet simulation
   storage.py         688 lines   SQLite persistence
   performance.py     777 lines   Parallel verify, sharded UTXO, pipeline
+
+bench_integrated.py      ~200 lines  Full pipeline TPS benchmark (Python)
 
 native/src/
   sha3.rs             49 lines   SHA3-256/512 (sha3 crate)

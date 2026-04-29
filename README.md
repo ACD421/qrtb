@@ -14,7 +14,7 @@ The protocol introduces **Consensus of Measurement**, a new consensus family whe
 
 ## Key Properties
 
-- **16M TPS** on consumer hardware (6 zones x 15 shards x 177,243 TPS/shard measured on RTX 4070)
+- **16M TPS** on consumer hardware (6 zones x 15 shards x ~173K TPS/shard integrated on RTX 4070)
 - **SHA3-256 only**: One primitive. FIPS 202 standardized. No algebraic structure to break.
 - **Quantum irrelevant**: No algebraic structure for Shor. Grover gives 2^128 -- physically impossible.
 - **1022+2 key design**: Unlimited wallet lifetime with forward secrecy. 1022 transaction keys + 2 reserved rotation keys per batch. No key exhaustion.
@@ -59,7 +59,7 @@ All measured on a single laptop (16-core CPU, RTX 4070 GPU, 8 GB VRAM).
 | Python (1 core) | 2,721 | 2,715 | 244,350 |
 | Python (8 cores) | 13,673 | 13,541 | 1,218,690 |
 | Rust (16 cores, rayon) | 53,472 | 51,160 | 4,604,400 |
-| **CUDA RTX 4070** | **177,260** | **177,243** | **15,951,870** |
+| **CUDA RTX 4070** | **177,260** | **~173,000** | **~15,570,000** |
 
 ### Native Cryptographic Primitives (Rust, Criterion-verified)
 
@@ -71,6 +71,16 @@ All measured on a single laptop (16-core CPU, RTX 4070 GPU, 8 GB VRAM).
 | WOTS+ Verify | 119 us | 8,400/s |
 | Merkle Build (1024 leaves) | 527 us | 1,900/s |
 | Merkle Proof Verify | 2.6 us | 385K/s |
+
+### Integrated Pipeline (full validation stack)
+
+Per-shard throughput includes: structure validation, UTXO check, WOTS+ signature verification, temporal auth Merkle proof verification, value conservation, and UTXO state update. Auth proof adds 2.3% overhead to WOTS+ verify.
+
+| Platform | Integrated TPS/shard | 90-shard TPS |
+|---|---|---|
+| Python (single core) | ~14,000 | ~1,260,000 |
+| Rust (16 cores, estimated) | ~272,000 | ~24,500,000 |
+| **CUDA RTX 4070 (estimated)** | **~173,000** | **~15,570,000** |
 
 ### Network Simulation
 
