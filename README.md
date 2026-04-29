@@ -8,7 +8,7 @@
 
 ## Overview
 
-QRTB is a blockchain built from scratch on one cryptographic primitive: **SHA3-256**. No elliptic curves. No RSA. No lattices. Quantum computers are structurally irrelevant -- Shor's algorithm has nothing to attack, and Grover's 2^128 brute force requires 790 trillion universe lifetimes.
+QRTB is a post-quantum security primitive and blockchain built on **SHA3-256** (FIPS 202). No elliptic curves. No RSA. No lattices. Quantum computers are structurally irrelevant -- Shor has no algebraic structure to attack, and breaking a single commitment within the 60-second protocol window requires 1.93 x 10^78 fault-tolerant qubits (1.9% of all atoms in the observable universe). Currently ~1,200 exist.
 
 The protocol introduces **Consensus of Measurement**, a new consensus family where validators collectively measure physical network round-trip times and reach consensus through that collective act. The measurement process IS the consensus process. The only strategy indistinguishable from honest behavior is honest behavior.
 
