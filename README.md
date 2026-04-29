@@ -93,11 +93,37 @@ Per-shard throughput includes: structure validation, UTXO check, WOTS+ signature
 
 ## Security Properties
 
-- **Quantum irrelevant**: Forging one WOTS+ signature via Grover requires 2^128 operations = 790 trillion universe lifetimes on hardware that requires 10--400 million physical qubits (currently ~1,000 exist)
+**Quantum irrelevant -- concrete qubit math:**
+
+Breaking QRTB requires a Grover search on SHA3-256 (Keccak-f[1600]). Each oracle: ~6,000 logical qubits = ~6 million physical qubits per machine (surface code, 10^-3 error rate), ~100ms per query.
+
+| Attack | Protocol Window | Parallel Machines | Total Qubits | vs Today (~1,200) |
+|---|---|---|---|---|
+| Forge Merkle proof | 60s (commit-reveal) | 4.13 x 10^45 | 2.48 x 10^52 | 10^49 x gap |
+| Forge WOTS+ signature | 15 min (epoch) | 1.43 x 10^69 | 8.6 x 10^75 | 10^72 x gap |
+| Break commitment | 60s (commit-reveal) | 3.21 x 10^71 | 1.93 x 10^78 | 10^75 x gap |
+
+The weakest attack needs 2.48 x 10^52 qubits -- the mass of 4 billion Earths converted to fault-tolerant quantum hardware. Current trajectory: ~1M qubits by 2050. Gap: 46 orders of magnitude.
+
+**Why not lattice-based PQC (ML-DSA/Dilithium)?**
+
+NIST standardized ML-DSA as the primary post-quantum signature (FIPS 204). Multiple 2025-2026 papers demonstrate devastating side-channel attacks:
+
+- Full key recovery in **30-300 power traces** (ePrint 2026/056, 2025/582)
+- Key recovery in **under 1 minute** via NTT-to-SIS attack (Keysight, Nov 2025)
+- **10-68x improvement** over prior art every few months (ePrint 2026/472)
+- Hedged mode provides **zero** side-channel protection
+- The attack surface is structural: NTT multiplication, rejection sampling, polynomial arithmetic all leak secrets
+
+NIST standardized SLH-DSA (hash-based) and selected HQC (code-based) explicitly as **lattice insurance**. QRTB builds on the same foundation as SLH-DSA -- hash functions only -- but as a complete protocol, not just a signature scheme.
+
+**QRTB has no polynomial arithmetic, no NTT, no rejection sampling, no secret-dependent branching.** Hash functions are constant-time by construction. The implementation attack surface is structurally absent.
+
+**Additional properties:**
 - **Forward secrecy**: One-way batch seed chain (SHA3-512). Past keys irrecoverable after rotation. Secure destruction via ctypes.memset (Python) / zeroize (Rust) / memset (C)
-- **Epoch-atomic finality**: All state tentative until BFT consensus at epoch end
+- **Epoch-atomic finality**: All state tentative until BFT consensus at epoch end. No quantum observation window.
 - **Self-correcting punishment**: Detection -> slashing -> stake erosion -> honest convergence
-- **Geometric hardness**: Triangle inequality creates O(N^2) constraints from O(N) measurements. Measurement forgery is geometrically infeasible.
+- **Geometric hardness**: Triangle inequality creates O(N^2) constraints from O(N) measurements
 
 ## Quick Start
 

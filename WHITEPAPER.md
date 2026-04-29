@@ -366,7 +366,21 @@ QRTB contains no cryptographic operation that benefits from quantum computation.
 
 This is not "quantum resistance" in the sense of defending against a realistic threat. It is structural immunity: the mathematical objects QRTB operates on (hash chains, Merkle trees, one-way derivations) have no quantum-exploitable structure. Shor's algorithm requires algebraic groups. Grover's algorithm provides only a square root speedup on brute force, which is irrelevant at 128+ bit security.
 
-**Comparison to NIST PQC standards**: ML-DSA (Dilithium) relies on Module-LWE, a lattice conjecture that may have undiscovered algebraic structure. NIST explicitly standardized SLH-DSA (SPHINCS+) as a hash-based backup in case lattice schemes fail. QRTB builds on the same foundation as SLH-DSA -- only hash functions -- but with 3.7x--23x smaller signatures (2,144 bytes vs. 7,856--49,856 bytes) and a complete blockchain protocol rather than a signature scheme alone.
+**Why not lattice-based PQC?**
+
+NIST standardized ML-DSA (FIPS 204, formerly Dilithium) as the primary post-quantum digital signature. Multiple 2025--2026 papers demonstrate that ML-DSA implementations are vulnerable to side-channel key recovery:
+
+- Full key recovery from **30--300 power traces** on ARM Cortex-M4 [13, 14]
+- Key recovery in **under 1 minute** via NTT-to-SIS reformulation [15]
+- **10--68x improvement** over prior state of the art in subkey recovery [16]
+- Hedged (non-deterministic) signing provides **zero** side-channel protection [13]
+- Loop-abort fault injection: key extraction in under 4 minutes from 5 faulted signatures [17]
+
+The attack surface is structural: NTT multiplication, rejection sampling, and polynomial arithmetic all create secret-dependent timing and power leakage. This is not fixable at the algorithm level -- it requires constant-time masked implementations that are extremely difficult to engineer correctly. New attack improvements appear every few months.
+
+NIST's response: standardize SLH-DSA (hash-based, FIPS 205) as explicit lattice insurance. Select HQC (code-based, March 2025) as non-lattice backup to ML-KEM. Both selections acknowledge that lattice assumptions might not hold.
+
+QRTB builds on the same foundation as SLH-DSA -- SHA3-256 only -- but with 3.7x--23x smaller signatures (2,144 bytes vs. 7,856--49,856 bytes) and a complete protocol rather than a signature scheme alone. QRTB has **no polynomial arithmetic, no NTT, no rejection sampling, no secret-dependent branching.** Hash functions are constant-time by construction. The implementation attack surface is structurally absent, not mitigated.
 
 ### 7.2 Epoch-Atomic Finality
 
@@ -614,6 +628,16 @@ The system is self-correcting: adversarial behavior is detected through physics,
 [9] F. Dabek et al., "Vivaldi: A Decentralized Network Coordinate System," SIGCOMM 2004.
 
 [12] K. Kohls et al., "VerLoc: Verifiable Localization in Decentralized Systems," USENIX Security 2022.
+
+[13] "Rejection Matters: Non-Profiled Side-Channel Attack on ML-DSA," ePrint 2026/056. Key recovery in 96--300 traces.
+
+[14] "Release the Power of Rejected Signatures," ePrint 2025/582. Key recovery in fewer than 30 traces.
+
+[15] Keysight, "PQC Implementations Still Leak: SCA and FI Risks in Dilithium and Kyber," November 2025. NTT-to-SIS key recovery in under 1 minute.
+
+[16] "Descent into Broken Trust," ePrint 2026/472. 37--68x reduction in subkey recovery cost.
+
+[17] Loop-abort fault injection bypass on ARM Cortex-M4, 2025. Key extraction in under 4 minutes from 5 faulted signatures.
 
 [10] NIST FIPS 202, "SHA-3 Standard: Permutation-Based Hash and Extendable-Output Functions," August 2015.
 
