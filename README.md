@@ -1,6 +1,6 @@
 # QRTB: Quantum-Resistant Temporal Blockchain
 
-**Consensus of Measurement | 16M TPS | Single Cryptographic Assumption**
+**Consensus of Measurement | 16M TPS | SHA3-256 Only | Quantum Irrelevant**
 
 **Author:** Andrew Dorman ([ACD421](https://github.com/ACD421))
 
@@ -8,14 +8,14 @@
 
 ## Overview
 
-QRTB is a blockchain built from scratch with one cryptographic assumption: **SHA3-256 pre-image resistance**. No elliptic curves. No RSA. No lattice assumptions. Quantum computers are structurally irrelevant -- Shor's algorithm has nothing to attack, and Grover's 2^128 brute force requires 790 trillion universe lifetimes.
+QRTB is a blockchain built from scratch on one cryptographic primitive: **SHA3-256**. No elliptic curves. No RSA. No lattices. Quantum computers are structurally irrelevant -- Shor's algorithm has nothing to attack, and Grover's 2^128 brute force requires 790 trillion universe lifetimes.
 
 The protocol introduces **Consensus of Measurement**, a new consensus family where validators collectively measure physical network round-trip times and reach consensus through that collective act. The measurement process IS the consensus process. The only strategy indistinguishable from honest behavior is honest behavior.
 
 ## Key Properties
 
 - **16M TPS** on consumer hardware (6 zones x 15 shards x 177,243 TPS/shard measured on RTX 4070)
-- **Single assumption**: SHA3-256 pre-image resistance. That's it.
+- **SHA3-256 only**: One primitive. FIPS 202 standardized. No algebraic structure to break.
 - **Quantum irrelevant**: No algebraic structure for Shor. Grover gives 2^128 -- physically impossible.
 - **1022+2 key design**: Unlimited wallet lifetime with forward secrecy. 1022 transaction keys + 2 reserved rotation keys per batch. No key exhaustion.
 - **Anti-centralization**: RTT measurement detects co-located validators. Datacenter concentration is slashable.

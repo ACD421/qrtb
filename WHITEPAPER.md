@@ -7,7 +7,7 @@
 
 ## Abstract
 
-We present QRTB, a blockchain protocol that achieves quantum resistance, 16 million transactions per second, and DoD-grade forward secrecy using a single cryptographic assumption: SHA3-256 pre-image resistance. No elliptic curves. No RSA. No lattice assumptions.
+We present QRTB, a blockchain protocol that achieves quantum irrelevance, 16 million transactions per second, and DoD-grade forward secrecy built on a single cryptographic primitive: SHA3-256 (FIPS 202). No elliptic curves. No RSA. No lattices. No assumptions.
 
 QRTB introduces **Consensus of Measurement**, a new consensus family in which validators collectively measure physical network properties (round-trip times between geographic zones) and reach consensus through that collective act. The measurement process IS the consensus process -- they are not separate mechanisms. Triangle inequality constraints make measurement forgery geometrically infeasible, commit-reveal prevents adaptive adversary behavior, and four independent detection signals identify dishonest participants with 96.9--99.4% accuracy at 0.19--0.25% false positive rates.
 
@@ -25,7 +25,7 @@ Blockchain consensus mechanisms have followed a trajectory from computational wa
 
 Simultaneously, the approach of quantum computing threatens the cryptographic foundations of every deployed blockchain. Bitcoin, Ethereum, and all ECDSA-based systems rely on the hardness of the elliptic curve discrete logarithm problem, which Shor's algorithm solves in polynomial time on a sufficiently large quantum computer. The NIST Post-Quantum Cryptography standardization process selected lattice-based schemes (ML-DSA/Dilithium) as the primary replacement, but NIST also standardized the hash-based SLH-DSA (SPHINCS+) as a backup -- explicitly acknowledging that lattice assumptions may prove fragile against future quantum algorithms.
 
-QRTB takes the most conservative possible position: the ONLY cryptographic assumption in the entire protocol is SHA3-256 pre-image resistance. This is the same assumption underlying NIST's backup standard (SLH-DSA), but QRTB implements it as a complete blockchain -- not just a signature scheme -- with a novel consensus mechanism, transaction model, key management system, and performance layer.
+QRTB takes the most conservative possible position: every cryptographic operation in the entire protocol reduces to SHA3-256, a FIPS 202 standardized primitive with 10+ years of cryptanalysis and no known weaknesses. This is the same foundation underlying NIST's backup standard (SLH-DSA), but QRTB implements it as a complete blockchain -- not just a signature scheme -- with a novel consensus mechanism, transaction model, key management system, and performance layer.
 
 ### 1.1 Contributions
 
@@ -41,7 +41,7 @@ This paper makes the following contributions:
 
 5. **16M TPS on consumer hardware**: Measured 177,243 TPS per shard on an NVIDIA RTX 4070 laptop GPU (verified across 500,000 transactions). 90 shards produce 15,951,870 TPS -- matching the design target within 0.3%.
 
-6. **Single-assumption architecture**: Every cryptographic operation -- signatures, key derivation, Merkle proofs, address generation, entropy mixing, measurement commitments -- reduces to SHA3-256 pre-image resistance. 128-bit post-quantum security throughout. Zero exposure to Shor's algorithm.
+6. **SHA3-256 only**: Every cryptographic operation -- signatures, key derivation, Merkle proofs, address generation, entropy mixing, measurement commitments -- is SHA3-256. One primitive. FIPS 202 standardized. No algebraic structure. Zero exposure to Shor's algorithm.
 
 7. **Three-language cross-validated implementation**: Python (reference), Rust (performance), and C (portability) implementations of all cryptographic primitives, verified to produce bit-identical output across all three.
 
@@ -80,7 +80,7 @@ Even with 1 million parallel fault-tolerant quantum computers, forging a single 
 
 ### 2.2 Network Adversary
 
-We assume a Byzantine adversary controlling up to f < N/3 validators, consistent with classical BFT bounds. The adversary can:
+Consider a Byzantine adversary controlling up to f < N/3 validators, consistent with classical BFT bounds. The adversary can:
 
 - Submit fabricated RTT measurements
 - Withhold votes to delay consensus
@@ -91,7 +91,7 @@ QRTB's defense: Consensus of Measurement with four-signal detection, commit-reve
 
 ### 2.3 Centralization Adversary
 
-We assume an adversary who attempts to gain disproportionate influence by co-locating validators in a datacenter or cloud region. This adversary can:
+Consider an adversary who attempts to gain disproportionate influence by co-locating validators in a datacenter or cloud region. This adversary can:
 
 - Deploy many validators with minimal geographic diversity
 - Leverage low-latency interconnects between co-located nodes
@@ -112,7 +112,7 @@ QRTB uses SHA3-256 (FIPS 202) for all hash operations requiring 256-bit output a
 - No algebraic structure exploitable by Shor's algorithm
 - NIST FIPS 202 standardized
 
-This is the ONLY hardness assumption in the entire protocol.
+This is the ONLY cryptographic primitive in the entire protocol.
 
 ### 3.2 WOTS+ Signatures
 
@@ -269,7 +269,7 @@ The detection engine analyzes the collective measurement dataset using four inde
 
 The security of Consensus of Measurement derives from geometric hardness rather than computational hardness.
 
-Triangle inequality is a physical law, not a cryptographic assumption. The speed of light in fiber is fixed. The distance between two geographic points is fixed. The minimum RTT between them is the ratio of these values. No validator can report an RTT below this floor without fabrication, and fabrication across multiple paths creates geometric inconsistencies that the detection engine catches.
+Triangle inequality is a physical law, not a cryptographic construct. The speed of light in fiber is fixed. The distance between two geographic points is fixed. The minimum RTT between them is the ratio of these values. No validator can report an RTT below this floor without fabrication, and fabrication across multiple paths creates geometric inconsistencies that the detection engine catches.
 
 With N validators each measuring O(N) peers, the triangle inequality produces O(N^2) constraints. An adversary has N free parameters (their claimed RTTs). For N >= 4, the system is over-determined. As network size grows, the constraint density grows quadratically while the adversary's degrees of freedom grow linearly. Forgery becomes progressively harder.
 
@@ -357,7 +357,7 @@ QRTB contains no cryptographic operation that benefits from quantum computation.
 
 This is not "quantum resistance" in the sense of defending against a realistic threat. It is structural immunity: the mathematical objects QRTB operates on (hash chains, Merkle trees, one-way derivations) have no quantum-exploitable structure. Shor's algorithm requires algebraic groups. Grover's algorithm provides only a square root speedup on brute force, which is irrelevant at 128+ bit security.
 
-**Comparison to NIST PQC standards**: ML-DSA (Dilithium) relies on Module-LWE, a lattice assumption that may have undiscovered algebraic structure. NIST explicitly standardized SLH-DSA (SPHINCS+) as a hash-based backup in case lattice assumptions fail. QRTB makes the same bet as SLH-DSA -- only hash functions -- but with 3.7x--23x smaller signatures (2,144 bytes vs. 7,856--49,856 bytes) and a complete blockchain protocol rather than a signature scheme alone.
+**Comparison to NIST PQC standards**: ML-DSA (Dilithium) relies on Module-LWE, a lattice conjecture that may have undiscovered algebraic structure. NIST explicitly standardized SLH-DSA (SPHINCS+) as a hash-based backup in case lattice schemes fail. QRTB builds on the same foundation as SLH-DSA -- only hash functions -- but with 3.7x--23x smaller signatures (2,144 bytes vs. 7,856--49,856 bytes) and a complete blockchain protocol rather than a signature scheme alone.
 
 ### 7.2 Epoch-Atomic Finality
 
@@ -553,7 +553,7 @@ GPU SHA3-256 output was cross-validated against the CPU implementation to ensure
 
 ## 12. Conclusion
 
-QRTB demonstrates that a quantum-resistant, high-throughput blockchain can be built from a single cryptographic assumption (SHA3-256 pre-image resistance) using a novel consensus mechanism (Consensus of Measurement) that aligns security incentives with geographic distribution rather than capital concentration or energy expenditure.
+QRTB demonstrates that a quantum-irrelevant, high-throughput blockchain can be built on a single cryptographic primitive (SHA3-256, FIPS 202) using a novel consensus mechanism (Consensus of Measurement) that aligns security incentives with geographic distribution rather than capital concentration or energy expenditure.
 
 The 1022+2 reserved rotation key design solves key exhaustion for hash-based signatures. Epoch-atomic finality eliminates the quantum observation window. Zone-sharded architecture achieves 16M TPS on consumer hardware while making datacenter centralization a punishable offense.
 
